@@ -24,7 +24,7 @@ A Raycast extension to quickly query AWS EC2 instance specifications, available 
 
 1.  **Clone the Repository:**
     ```bash
-    git clone [https://github.com/hugoch/raycast-aws-query.git](https://github.com/hugoch/raycast-aws-query.git)
+    git clone https://github.com/hugoch/raycast-aws-query
     cd raycast-aws-query
     ```
     *Alternatively, you can download a release ZIP file from the repository's releases page and extract it.*
