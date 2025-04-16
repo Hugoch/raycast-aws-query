@@ -12,6 +12,9 @@ A Raycast extension to quickly query AWS EC2 instance specifications, available 
 * **Region Availability:** View a list of AWS regions where the selected instance type is available (according to the database).
 * **Offline Access:** Works entirely offline using a local SQLite database file.
 
+![screenshot.png](assets/screenshot.png)
+
+
 ## Requirements
 
 * [Raycast](https://www.raycast.com) (macOS application)
