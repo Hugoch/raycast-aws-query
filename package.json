@@ -1,0 +1,44 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "aws-instance-query",
+  "version": "0.1.0",
+  "title": "AWS Instance Query",
+  "description": "Query AWS instance specifications, regions, and pricing from a local CSV file.",
+  "icon": "command-icon.png",
+  "author": "hlarcher",
+  "license": "MIT",
+  "categories": [
+    "Communication"
+  ],
+  "commands": [
+    {
+      "name": "index",
+      "title": "Search AWS Instances",
+      "description": "Search AWS instance types for specs, regions, and pricing",
+      "mode": "view"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.93.2",
+    "@raycast/utils": "^1.19.1",
+    "better-sqlite3": "^11.9.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.17.30",
+    "@types/react": "^18.3.20",
+    "@typescript-eslint/eslint-plugin": "^7.11.0",
+    "@typescript-eslint/parser": "^7.11.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint",
+    "publish": "ray publish"
+  }
+}
