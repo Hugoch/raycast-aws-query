@@ -19,7 +19,7 @@ interface BaseInstanceInfo {
   instanceType: string;
   vCpus: number;
   memorySizeInGiB: number; // Calculated from MiB
-  storageInGB: string; // Updated to string to handle "EBS only"
+  storageInGB: string;
   networkPerformance: string;
   onDemandLinuxHr?: number | null; // Sample hourly price (can be null)
   disks?: DiskInfo[]; // Array of disk information
@@ -42,19 +42,14 @@ type InstanceListQueryResult = {
   storage: string;
   networkPerformance: string;
   onDemandLinuxHr: number | null; // MIN returns null if no matching rows in LEFT JOIN
+  count: number | null;
+  sizeInGB: number | null;
+  type: string | null;
 };
 
 // Type for the structure returned by the region SQL query
 type RegionQueryResult = {
   location: string[];
-};
-
-// Type for the structure returned by the disks SQL query
-type DiskQueryResult = {
-  instanceType: string;
-  count: number;
-  sizeInGB: number;
-  type: string;
 };
 
 // --- Database Path ---
@@ -107,13 +102,18 @@ export default function Command() {
           t.memorySizeInMiB,
           t.storage,
           t.networkPerformance,
-          MIN(p.onDemandLinuxHr) as onDemandLinuxHr
+          MIN(p.onDemandLinuxHr) as onDemandLinuxHr,
+          d.count as count,
+          d.sizeInGB as sizeInGB,
+          d.type as type
       FROM
           "instance-types" t
       LEFT JOIN
           "instance-shared-prices" p ON t.instanceType = p.instanceType
+      LEFT JOIN
+          "instance-disks" d ON t.instanceType = d.instanceType
       GROUP BY
-          t.instanceType
+          t.instanceType, d.count, d.sizeInGB, d.type
       ORDER BY
           t.instanceType;
   `,
@@ -132,25 +132,6 @@ export default function Command() {
     execute: dbExists,
   });
 
-  // SQL query to fetch disk information for all instances
-  const diskQuery = useMemo(
-    () => `
-      SELECT
-          d.instanceType,
-          d.count,
-          d.sizeInGB,
-          d.type
-      FROM
-          "instance-disks" d;
-    `,
-    [],
-  );
-
-  // Use the useSQL hook to fetch disk information
-  const { data: rawDiskData } = useSQL<DiskQueryResult>(dbPath, diskQuery, {
-    execute: dbExists,
-  });
-
   // Process the raw data returned by useSQL
   const instances = useMemo((): BaseInstanceInfo[] => {
     if (!rawInstanceData) {
@@ -158,26 +139,28 @@ export default function Command() {
     }
 
     // Group disk data by instanceType
-    const diskDataByInstanceType =
-      rawDiskData?.reduce(
-        (acc, disk) => {
-          if (!acc[disk.instanceType]) {
-            acc[disk.instanceType] = [];
-          }
-          acc[disk.instanceType].push({
-            count: disk.count,
-            sizeInGB: disk.sizeInGB,
-            type: disk.type,
-            iops: instanceStoreIOPS[disk.instanceType], // Fetch IOPS data
-            estimatedSpeed: estimateDiskSpeed(
-              instanceStoreIOPS[disk.instanceType],
-              disk.type,
-            ), // Estimate speeds
-          });
+    const diskDataByInstanceType = rawInstanceData.reduce(
+      (acc, row) => {
+        if (!row.count || !row.sizeInGB || !row.type) {
           return acc;
-        },
-        {} as Record<string, DiskInfo[]>,
-      ) || {};
+        }
+        if (!acc[row.instanceType]) {
+          acc[row.instanceType] = [];
+        }
+        acc[row.instanceType].push({
+          count: row.count,
+          sizeInGB: row.sizeInGB,
+          type: row.type,
+          iops: instanceStoreIOPS[row.instanceType], // Fetch IOPS data
+          estimatedSpeed: estimateDiskSpeed(
+            instanceStoreIOPS[row.instanceType],
+            row.type,
+          ), // Estimate speeds
+        });
+        return acc;
+      },
+      {} as Record<string, DiskInfo[]>,
+    );
 
     // Map results to the BaseInstanceInfo interface, converting MiB to GiB
     return rawInstanceData.map((row) => {
@@ -200,7 +183,7 @@ export default function Command() {
         disks: disks, // Attach disk info
       };
     });
-  }, [rawInstanceData, rawDiskData]); // Recalculate only when rawInstanceData or rawDiskData changes
+  }, [rawInstanceData]); // Recalculate only when rawInstanceData changes
 
   // Filter instances based on search text
   const filteredInstances = useMemo(() => {
