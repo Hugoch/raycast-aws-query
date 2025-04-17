@@ -39,7 +39,6 @@ A Raycast extension to quickly query AWS EC2 instance specifications, available 
         ```bash
         npm run build
         ```
-    * This will create a `dist` folder containing the compiled extension code.
 
  
 4. **Add to Raycast:**
