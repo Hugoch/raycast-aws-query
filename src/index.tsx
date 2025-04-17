@@ -10,6 +10,7 @@ import { useSQL } from "@raycast/utils";
 import { useState, useMemo } from "react";
 import path from "path";
 import fs from "fs";
+import { instanceStoreIOPS } from "./instanceStoreIOPS";
 
 // --- Interfaces ---
 
@@ -18,7 +19,7 @@ interface BaseInstanceInfo {
   instanceType: string;
   vCpus: number;
   memorySizeInGiB: number; // Calculated from MiB
-  storageInGiB: number; // Calculated from disk data
+  storageInGB: string; // Updated to string to handle "EBS only"
   networkPerformance: string;
   onDemandLinuxHr?: number | null; // Sample hourly price (can be null)
   disks?: DiskInfo[]; // Array of disk information
@@ -27,8 +28,9 @@ interface BaseInstanceInfo {
 // Interface for disk information
 interface DiskInfo {
   count: number;
-  sizeInGiB: number;
+  sizeInGB: number;
   type: string;
+  iops?: { randomRead: number; write: number }; // IOPS for the disk
 }
 
 // Type for the structure returned directly by the main list SQL query
@@ -147,8 +149,9 @@ export default function Command() {
           }
           acc[disk.instanceType].push({
             count: disk.count,
-            sizeInGiB: parseFloat((disk.sizeInGB / 1.07374).toFixed(2)), // Convert GB to GiB
+            sizeInGB: disk.sizeInGB,
             type: disk.type,
+            iops: instanceStoreIOPS[disk.instanceType], // Fetch IOPS data
           });
           return acc;
         },
@@ -158,8 +161,8 @@ export default function Command() {
     // Map results to the BaseInstanceInfo interface, converting MiB to GiB
     return rawInstanceData.map((row) => {
       const disks = diskDataByInstanceType[row.instanceType] || [];
-      const totalStorageInGiB = disks.reduce(
-        (sum, disk) => sum + disk.count * disk.sizeInGiB,
+      const totalStorageInGB = disks.reduce(
+        (sum, disk) => sum + disk.count * disk.sizeInGB,
         0,
       );
 
@@ -169,7 +172,8 @@ export default function Command() {
         memorySizeInGiB: row.memorySizeInMiB
           ? parseFloat((row.memorySizeInMiB / 1024).toFixed(2))
           : 0, // Calculate GiB
-        storageInGiB: totalStorageInGiB, // Calculate total storage from disks
+        storageInGB:
+          totalStorageInGB > 0 ? `${totalStorageInGB} GB` : "EBS only", // Show "EBS only" if no storage
         networkPerformance: row.networkPerformance,
         onDemandLinuxHr: row.onDemandLinuxHr, // Already fetched as potentially null
         disks: disks, // Attach disk info
@@ -222,19 +226,23 @@ export default function Command() {
         <List.Item
           key={instance.instanceType}
           title={instance.instanceType}
-          subtitle={`${instance.vCpus} vCPU | ${instance.memorySizeInGiB} GiB RAM | ${instance.storageInGiB} GiB Storage`}
+          subtitle={`${instance.vCpus} vCPU | ${instance.memorySizeInGiB} GiB RAM | ${instance.storageInGB}`}
           accessories={[
             { tag: formatPrice(instance.onDemandLinuxHr, 4) + "/hr" },
           ]}
           // Pass base info to Detail view
           detail={
             <List.Item.Detail
-              markdown={`# ${instance.instanceType}\n\n* **vCPUs**: ${instance.vCpus}\n\n* **Memory**: ${instance.memorySizeInGiB} GiB\n\n* **Storage**: ${instance.storageInGiB} GiB\n\n* **Network**: ${instance.networkPerformance}\n\n* **Disks**:\n${
+              markdown={`# ${instance.instanceType}\n\n* **vCPUs**: ${instance.vCpus}\n\n* **Memory**: ${instance.memorySizeInGiB} GiB\n\n* **Storage**: ${instance.storageInGB}\n\n* **Network**: ${instance.networkPerformance}\n\n* **Disks**:\n${
                 instance.disks?.length > 0
                   ? instance.disks
                       .map(
                         (disk) =>
-                          `  - ${disk.count} x ${disk.sizeInGiB} GiB (${disk.type})`,
+                          `  - ${disk.count} x ${disk.sizeInGB} GB (${disk.type})${
+                            disk.iops
+                              ? `\n  - Random Read IOPS: ${disk.iops.randomRead}\n  - Write IOPS: ${disk.iops.write}`
+                              : ""
+                          }`,
                       )
                       .join("\n")
                   : "  - No disk information available."
@@ -298,14 +306,21 @@ function InstanceDetailView({ baseInfo }: { baseInfo: BaseInstanceInfo }) {
 ## Specifications
 * **vCPUs:** ${baseInfo.vCpus}
 * **Memory:** ${baseInfo.memorySizeInGiB} GiB
-* **Storage:** ${baseInfo.storageInGiB} GiB
+* **Storage:** ${baseInfo.storageInGB}
 * **Network:** ${baseInfo.networkPerformance}
 
 ## Disks
 ${
   baseInfo.disks && baseInfo.disks.length > 0
     ? baseInfo.disks
-        .map((disk) => `* ${disk.count} x ${disk.sizeInGiB} GiB (${disk.type})`)
+        .map(
+          (disk) =>
+            `* ${disk.count} x ${disk.sizeInGB} GB (${disk.type})${
+              disk.iops
+                ? `\n* Random Read IOPS: ${disk.iops.randomRead}\n* Write IOPS: ${disk.iops.write}`
+                : ""
+            }`,
+        )
         .join("\n")
     : "*No disk information available.*"
 }
@@ -343,8 +358,8 @@ ${
             text={String(baseInfo.memorySizeInGiB)}
           />
           <Detail.Metadata.Label
-            title="Storage (GiB)"
-            text={String(baseInfo.storageInGiB)}
+            title="Storage (GB)"
+            text={baseInfo.storageInGB}
           />
           <Detail.Metadata.Label
             title="Network Performance"
@@ -376,7 +391,11 @@ ${
                 ? baseInfo.disks
                     .map(
                       (disk) =>
-                        `${disk.count} x ${disk.sizeInGiB} GiB (${disk.type})`,
+                        `${disk.count} x ${disk.sizeInGB} GB (${disk.type})${
+                          disk.iops
+                            ? ` | Random Read IOPS: ${disk.iops.randomRead}, Write IOPS: ${disk.iops.write}`
+                            : ""
+                        }`,
                     )
                     .join(", ")
                 : "No disk information available."
