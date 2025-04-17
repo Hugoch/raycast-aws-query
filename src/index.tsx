@@ -72,10 +72,7 @@ const formatPrice = (
 };
 
 // Estimate disk speeds based on IOPS and block size
-const estimateDiskSpeed = (
-  iops?: { randomRead: number; write: number },
-  type?: string,
-) => {
+const estimateDiskSpeed = (iops?: { randomRead: number; write: number }) => {
   if (!iops) return undefined;
 
   // Define block size based on documentation
@@ -154,7 +151,6 @@ export default function Command() {
           iops: instanceStoreIOPS[row.instanceType], // Fetch IOPS data
           estimatedSpeed: estimateDiskSpeed(
             instanceStoreIOPS[row.instanceType],
-            row.type,
           ), // Estimate speeds
         });
         return acc;
@@ -238,7 +234,7 @@ export default function Command() {
           detail={
             <List.Item.Detail
               markdown={`# ${instance.instanceType}\n\n* **vCPUs**: ${instance.vCpus}\n\n* **Memory**: ${instance.memorySizeInGiB} GiB\n\n* **Storage**: ${instance.storageInGB}\n\n* **Network**: ${instance.networkPerformance}\n\n* **Disks**:\n${
-                instance.disks?.length > 0
+                instance.disks && instance.disks.length > 0
                   ? instance.disks
                       .map(
                         (disk) =>
