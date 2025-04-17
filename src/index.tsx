@@ -31,6 +31,7 @@ interface DiskInfo {
   sizeInGB: number;
   type: string;
   iops?: { randomRead: number; write: number }; // IOPS for the disk
+  estimatedSpeed?: { readSpeed: string; writeSpeed: string }; // Estimated speeds based on IOPS
 }
 
 // Type for the structure returned directly by the main list SQL query
@@ -73,6 +74,22 @@ const formatPrice = (
   }
   if (price === 0) return "$0.00";
   return `$${price.toFixed(precision)}`;
+};
+
+// Estimate disk speeds based on IOPS and block size
+const estimateDiskSpeed = (
+  iops?: { randomRead: number; write: number },
+  type?: string,
+) => {
+  if (!iops) return undefined;
+
+  // Define block size based on documentation
+  const blockSize = 4; // 4,096 bytes = 4 KB
+
+  const readSpeed = `${((iops.randomRead * blockSize) / 1024).toFixed(2)} MiB/s`;
+  const writeSpeed = `${((iops.write * blockSize) / 1024).toFixed(2)} MiB/s`;
+
+  return { readSpeed, writeSpeed };
 };
 
 // --- React Components ---
@@ -152,6 +169,10 @@ export default function Command() {
             sizeInGB: disk.sizeInGB,
             type: disk.type,
             iops: instanceStoreIOPS[disk.instanceType], // Fetch IOPS data
+            estimatedSpeed: estimateDiskSpeed(
+              instanceStoreIOPS[disk.instanceType],
+              disk.type,
+            ), // Estimate speeds
           });
           return acc;
         },
@@ -240,7 +261,7 @@ export default function Command() {
                         (disk) =>
                           `  - ${disk.count} x ${disk.sizeInGB} GB (${disk.type})${
                             disk.iops
-                              ? `\n  - Random Read IOPS: ${disk.iops.randomRead}\n  - Write IOPS: ${disk.iops.write}`
+                              ? `\n  - Random Read IOPS: ${disk.iops.randomRead} (${disk.estimatedSpeed?.readSpeed})\n  - Write IOPS: ${disk.iops.write} (${disk.estimatedSpeed?.writeSpeed})`
                               : ""
                           }`,
                       )
@@ -317,7 +338,7 @@ ${
           (disk) =>
             `* ${disk.count} x ${disk.sizeInGB} GB (${disk.type})${
               disk.iops
-                ? `\n* Random Read IOPS: ${disk.iops.randomRead}\n* Write IOPS: ${disk.iops.write}`
+                ? `\n* Random Read IOPS: ${disk.iops.randomRead} (${disk.estimatedSpeed?.readSpeed})\n* Write IOPS: ${disk.iops.write} (${disk.estimatedSpeed?.writeSpeed})`
                 : ""
             }`,
         )
@@ -389,14 +410,9 @@ ${
             text={
               baseInfo.disks && baseInfo.disks.length > 0
                 ? baseInfo.disks
-                    .map(
-                      (disk) =>
-                        `${disk.count} x ${disk.sizeInGB} GB (${disk.type})${
-                          disk.iops
-                            ? ` | Random Read IOPS: ${disk.iops.randomRead}, Write IOPS: ${disk.iops.write}`
-                            : ""
-                        }`,
-                    )
+                    .map((disk) => {
+                      return `${disk.count} x ${disk.sizeInGB} GB (${disk.type})`;
+                    })
                     .join(", ")
                 : "No disk information available."
             }
