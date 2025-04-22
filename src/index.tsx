@@ -10,6 +10,7 @@ import { useSQL } from "@raycast/utils";
 import { useState, useMemo } from "react";
 import path from "path";
 import fs from "fs";
+import { instanceStoreIOPS } from "./instanceStoreIOPS";
 
 // --- Interfaces ---
 
@@ -18,9 +19,19 @@ interface BaseInstanceInfo {
   instanceType: string;
   vCpus: number;
   memorySizeInGiB: number; // Calculated from MiB
-  storage: string;
+  storageInGB: string;
   networkPerformance: string;
   onDemandLinuxHr?: number | null; // Sample hourly price (can be null)
+  disks?: DiskInfo[]; // Array of disk information
+}
+
+// Interface for disk information
+interface DiskInfo {
+  count: number;
+  sizeInGB: number;
+  type: string;
+  iops?: { randomRead: number; write: number }; // IOPS for the disk
+  estimatedSpeed?: { readSpeed: string; writeSpeed: string }; // Estimated speeds based on IOPS
 }
 
 // Type for the structure returned directly by the main list SQL query
@@ -31,6 +42,9 @@ type InstanceListQueryResult = {
   storage: string;
   networkPerformance: string;
   onDemandLinuxHr: number | null; // MIN returns null if no matching rows in LEFT JOIN
+  count: number | null;
+  sizeInGB: number | null;
+  type: string | null;
 };
 
 // Type for the structure returned by the region SQL query
@@ -57,6 +71,19 @@ const formatPrice = (
   return `$${price.toFixed(precision)}`;
 };
 
+// Estimate disk speeds based on IOPS and block size
+const estimateDiskSpeed = (iops?: { randomRead: number; write: number }) => {
+  if (!iops) return undefined;
+
+  // Define block size based on documentation
+  const blockSize = 4; // 4,096 bytes = 4 KB
+
+  const readSpeed = `${((iops.randomRead * blockSize) / 1024).toFixed(0)} MiB/s`;
+  const writeSpeed = `${((iops.write * blockSize) / 1024).toFixed(0)} MiB/s`;
+
+  return { readSpeed, writeSpeed };
+};
+
 // --- React Components ---
 
 // Main Raycast Command Component
@@ -72,13 +99,18 @@ export default function Command() {
           t.memorySizeInMiB,
           t.storage,
           t.networkPerformance,
-          MIN(p.onDemandLinuxHr) as onDemandLinuxHr
+          MIN(p.onDemandLinuxHr) as onDemandLinuxHr,
+          d.count as count,
+          d.sizeInGB as sizeInGB,
+          d.type as type
       FROM
           "instance-types" t
       LEFT JOIN
           "instance-shared-prices" p ON t.instanceType = p.instanceType
+      LEFT JOIN
+          "instance-disks" d ON t.instanceType = d.instanceType
       GROUP BY
-          t.instanceType
+          t.instanceType, d.count, d.sizeInGB, d.type
       ORDER BY
           t.instanceType;
   `,
@@ -102,17 +134,51 @@ export default function Command() {
     if (!rawInstanceData) {
       return [];
     }
+
+    // Group disk data by instanceType
+    const diskDataByInstanceType = rawInstanceData.reduce(
+      (acc, row) => {
+        if (!row.count || !row.sizeInGB || !row.type) {
+          return acc;
+        }
+        if (!acc[row.instanceType]) {
+          acc[row.instanceType] = [];
+        }
+        acc[row.instanceType].push({
+          count: row.count,
+          sizeInGB: row.sizeInGB,
+          type: row.type,
+          iops: instanceStoreIOPS[row.instanceType], // Fetch IOPS data
+          estimatedSpeed: estimateDiskSpeed(
+            instanceStoreIOPS[row.instanceType],
+          ), // Estimate speeds
+        });
+        return acc;
+      },
+      {} as Record<string, DiskInfo[]>,
+    );
+
     // Map results to the BaseInstanceInfo interface, converting MiB to GiB
-    return rawInstanceData.map((row) => ({
-      instanceType: row.instanceType,
-      vCpus: row.vCpus,
-      memorySizeInGiB: row.memorySizeInMiB
-        ? parseFloat((row.memorySizeInMiB / 1024).toFixed(2))
-        : 0, // Calculate GiB
-      storage: row.storage,
-      networkPerformance: row.networkPerformance,
-      onDemandLinuxHr: row.onDemandLinuxHr, // Already fetched as potentially null
-    }));
+    return rawInstanceData.map((row) => {
+      const disks = diskDataByInstanceType[row.instanceType] || [];
+      const totalStorageInGB = disks.reduce(
+        (sum, disk) => sum + disk.count * disk.sizeInGB,
+        0,
+      );
+
+      return {
+        instanceType: row.instanceType,
+        vCpus: row.vCpus,
+        memorySizeInGiB: row.memorySizeInMiB
+          ? parseFloat((row.memorySizeInMiB / 1024).toFixed(2))
+          : 0, // Calculate GiB
+        storageInGB:
+          totalStorageInGB > 0 ? `${totalStorageInGB} GB` : "EBS only", // Show "EBS only" if no storage
+        networkPerformance: row.networkPerformance,
+        onDemandLinuxHr: row.onDemandLinuxHr, // Already fetched as potentially null
+        disks: disks, // Attach disk info
+      };
+    });
   }, [rawInstanceData]); // Recalculate only when rawInstanceData changes
 
   // Filter instances based on search text
@@ -160,14 +226,27 @@ export default function Command() {
         <List.Item
           key={instance.instanceType}
           title={instance.instanceType}
-          subtitle={`${instance.vCpus} vCPU | ${instance.memorySizeInGiB} GiB RAM | ${instance.storage}`}
+          subtitle={`${instance.vCpus} vCPU | ${instance.memorySizeInGiB} GiB RAM | ${instance.storageInGB}`}
           accessories={[
             { tag: formatPrice(instance.onDemandLinuxHr, 4) + "/hr" },
           ]}
           // Pass base info to Detail view
           detail={
             <List.Item.Detail
-              markdown={`# ${instance.instanceType}\n\n* **vCPUs**: ${instance.vCpus}\n\n* **Memory**: ${instance.memorySizeInGiB} GiB\n\n* **Storage**: ${instance.storage}\n\n* **Network**: ${instance.networkPerformance}`}
+              markdown={`# ${instance.instanceType}\n\n* **vCPUs**: ${instance.vCpus}\n\n* **Memory**: ${instance.memorySizeInGiB} GiB\n\n* **Storage**: ${instance.storageInGB}\n\n* **Network**: ${instance.networkPerformance}\n\n* **Disks**:\n${
+                instance.disks && instance.disks.length > 0
+                  ? instance.disks
+                      .map(
+                        (disk) =>
+                          `  - ${disk.count} x ${disk.sizeInGB} GB (${disk.type.toUpperCase()})${
+                            disk.iops
+                              ? `\n  - Random Read IOPS: ${disk.iops.randomRead} (${disk.estimatedSpeed?.readSpeed})\n  - Write IOPS: ${disk.iops.write} (${disk.estimatedSpeed?.writeSpeed})`
+                              : ""
+                          }`,
+                      )
+                      .join("\n")
+                  : "  - No disk information available."
+              }`}
             />
           }
           actions={
@@ -227,8 +306,24 @@ function InstanceDetailView({ baseInfo }: { baseInfo: BaseInstanceInfo }) {
 ## Specifications
 * **vCPUs:** ${baseInfo.vCpus}
 * **Memory:** ${baseInfo.memorySizeInGiB} GiB
-* **Storage:** ${baseInfo.storage}
+* **Storage:** ${baseInfo.storageInGB}
 * **Network:** ${baseInfo.networkPerformance}
+
+## Disks
+${
+  baseInfo.disks && baseInfo.disks.length > 0
+    ? baseInfo.disks
+        .map(
+          (disk) =>
+            `* ${disk.count} x ${disk.sizeInGB} GB (${disk.type.toUpperCase()})${
+              disk.iops
+                ? `\n* Random Read IOPS: ${disk.iops.randomRead} (${disk.estimatedSpeed?.readSpeed})\n* Write IOPS: ${disk.iops.write} (${disk.estimatedSpeed?.writeSpeed})`
+                : ""
+            }`,
+        )
+        .join("\n")
+    : "*No disk information available.*"
+}
 
 ## On-Demand Linux Pricing (Sample)
 * **Hourly:** ${formatPrice(baseInfo.onDemandLinuxHr, 4)}
@@ -262,7 +357,10 @@ ${
             title="Memory (GiB)"
             text={String(baseInfo.memorySizeInGiB)}
           />
-          <Detail.Metadata.Label title="Storage" text={baseInfo.storage} />
+          <Detail.Metadata.Label
+            title="Storage (GB)"
+            text={baseInfo.storageInGB}
+          />
           <Detail.Metadata.Label
             title="Network Performance"
             text={baseInfo.networkPerformance}
@@ -283,6 +381,19 @@ ${
                 : regionError
                   ? "Error"
                   : String(regions?.length ?? "N/A")
+            }
+          />
+          <Detail.Metadata.Separator />
+          <Detail.Metadata.Label
+            title="Disks"
+            text={
+              baseInfo.disks && baseInfo.disks.length > 0
+                ? baseInfo.disks
+                    .map((disk) => {
+                      return `${disk.count} x ${disk.sizeInGB} GB (${disk.type})`;
+                    })
+                    .join(", ")
+                : "No disk information available."
             }
           />
         </Detail.Metadata>
