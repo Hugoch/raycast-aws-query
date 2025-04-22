@@ -315,7 +315,7 @@ ${
     ? baseInfo.disks
         .map(
           (disk) =>
-            `* ${disk.count} x ${disk.sizeInGB} GB (${disk.type})${
+            `* ${disk.count} x ${disk.sizeInGB} GB (${disk.type.toUpperCase()})${
               disk.iops
                 ? `\n* Random Read IOPS: ${disk.iops.randomRead} (${disk.estimatedSpeed?.readSpeed})\n* Write IOPS: ${disk.iops.write} (${disk.estimatedSpeed?.writeSpeed})`
                 : ""
