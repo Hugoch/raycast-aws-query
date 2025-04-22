@@ -79,7 +79,7 @@ const estimateDiskSpeed = (iops?: { randomRead: number; write: number }) => {
   const blockSize = 4; // 4,096 bytes = 4 KB
 
   const readSpeed = `${((iops.randomRead * blockSize) / 1024).toFixed(0)} MiB/s`;
-  const writeSpeed = `${((iops.write * blockSize) / 1024).toFixed(2)} MiB/s`;
+  const writeSpeed = `${((iops.write * blockSize) / 1024).toFixed(0)} MiB/s`;
 
   return { readSpeed, writeSpeed };
 };
