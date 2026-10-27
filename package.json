@@ -19,8 +19,8 @@
     }
   ],
   "dependencies": {
-    "@raycast/api": "^1.96.0",
-    "@raycast/utils": "^1.19.1",
+    "@raycast/api": "^2.9.0",
+    "@raycast/utils": "^2.3.3",
     "better-sqlite3": "^11.9.1"
   },
   "devDependencies": {
